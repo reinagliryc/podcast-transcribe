@@ -29,11 +29,17 @@ uv tool install git+https://github.com/reinagliryc/podcast-transcribe
 
 ## API key
 
-Get a key at <https://console.groq.com/keys>. It is looked up, in order, from:
+Get a key at <https://console.groq.com/keys>. The first match wins:
 
-1. `--api-key`
-2. the `GROQ_API_KEY` environment variable
-3. the key store of Simon Willison's [`llm`](https://llm.datasette.io/) (`llm keys set groq`)
+1. `--api-key KEY` (avoid it: command lines are visible to other users via `ps`)
+2. `--api-key-file PATH`
+3. the `GROQ_API_KEY` environment variable
+4. the `GROQ_API_KEY_FILE` environment variable (path to a file holding the key)
+5. `$CREDENTIALS_DIRECTORY/groq`, i.e. systemd's `LoadCredential=groq:/path/to/key`
+6. the key store of Simon Willison's [`llm`](https://llm.datasette.io/) (`llm keys set groq`)
+
+Prefer a file (`chmod 600`) to an environment variable. In any case the key is removed from the
+environment of `ffmpeg` and `yt-dlp`, which never need it.
 
 ## Usage
 
@@ -63,6 +69,40 @@ import subprocess
 text = subprocess.run(["podcast-transcribe", url, "-l", "fr", "-q"],
                       capture_output=True, text=True, check=True).stdout
 ```
+
+### As a hardened systemd service
+
+The tool downloads and decodes untrusted media (ffmpeg) and visits arbitrary web pages (yt-dlp).
+For unattended jobs, run it sandboxed and hand it the key as a systemd credential, so it never
+appears in the environment, the process list or the Nix store. NixOS example:
+
+```nix
+systemd.services.podcast-digest = {
+  path = [ podcast-transcribe ];
+  script = ''
+    podcast-transcribe https://feeds.example.com/show.xml -l fr -q -o "$STATE_DIRECTORY/latest.txt"
+  '';
+  environment.XDG_CACHE_HOME = "/var/cache/podcast-digest";
+  serviceConfig = {
+    LoadCredential = "groq:/var/lib/secrets/groq.key";  # root-only file, read by systemd
+    DynamicUser = true;
+    StateDirectory = "podcast-digest";
+    CacheDirectory = "podcast-digest";
+    ProtectSystem = "strict";
+    ProtectHome = true;
+    PrivateTmp = true;
+    PrivateDevices = true;
+    NoNewPrivileges = true;
+  };
+};
+```
+
+## Security notes
+
+- The key is sent only to `https://api.groq.com` and is never logged or cached.
+- Cached files under `~/.cache/podcast-transcribe` contain transcripts, never the key.
+- Audio from untrusted sources is parsed by ffmpeg, which has a history of vulnerabilities on
+  crafted files: sandbox unattended runs as shown above.
 
 ## Speaker diarization
 

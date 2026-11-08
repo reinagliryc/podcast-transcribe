@@ -1,6 +1,6 @@
 [project]
 name = "podcast-transcribe"
-version = "0.1.0"
+version = "0.2.0"
 description = "Transcribe a podcast episode (URL, RSS feed or local file) with Whisper on Groq, ready to pipe into an LLM."
 readme = "README.md"
 license = "MIT"

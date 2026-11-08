@@ -84,11 +84,13 @@ def ytdlp_download(url: str, dest_dir: Path) -> Path:
         raise RuntimeError(f"{url} is not an audio file or RSS feed; install yt-dlp to handle web pages")
     dest_dir.mkdir(parents=True, exist_ok=True)
     log(f"Fetching audio with yt-dlp: {url}")
-    subprocess.run(
+    result = subprocess.run(
         [exe, "--no-playlist", "-f", "bestaudio/best", "-q", "--no-warnings",
-         "-o", str(dest_dir / "source.%(ext)s"), url],
-        check=True,
+         "--print", "after_move:title", "-o", str(dest_dir / "source.%(ext)s"), url],
+        check=True, stdout=subprocess.PIPE, text=True, env=audio.child_env(),
     )
+    if title := result.stdout.strip():
+        (dest_dir / "title.txt").write_text(title, encoding="utf-8")
     found = [p for p in dest_dir.glob("source.*") if not p.name.endswith(".part")]
     if not found:
         raise RuntimeError("yt-dlp did not produce an audio file")
@@ -152,7 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", type=Path, help="write to this file instead of stdout")
     p.add_argument("-m", "--model", default=groq.DEFAULT_MODEL, help=f"Groq model (default: {groq.DEFAULT_MODEL})")
     p.add_argument("-p", "--prompt", help="context or spellings to guide Whisper (names, jargon)")
-    p.add_argument("--api-key", help="Groq API key (default: $GROQ_API_KEY, then `llm keys get groq`)")
+    p.add_argument("--api-key", help="Groq API key (prefer --api-key-file: command lines are visible to other users)")
+    p.add_argument("--api-key-file", type=Path, help="file containing the Groq API key (default: $GROQ_API_KEY_FILE)")
     p.add_argument("--cache-dir", type=Path, default=default_cache_dir(), help="where downloads and transcripts are cached")
     p.add_argument("--no-cache", action="store_true", help="ignore any cached transcript")
     p.add_argument("--keep-audio", action="store_true", help="keep downloaded audio in the cache after transcribing")
@@ -175,8 +178,11 @@ def run(args: argparse.Namespace) -> int:
         log(f"Using cached transcript: {cached}")
         transcript = json.loads(cached.read_text())
     else:
-        api_key = groq.find_api_key(args.api_key)
+        api_key = groq.find_api_key(args.api_key, args.api_key_file)
         source = fetch()
+        if (title_file := entry / "title.txt").exists():
+            title = title_file.read_text(encoding="utf-8").strip() or title
+            log(f"Title: {title}")
         log("Compressing audio (16 kHz mono)...")
         small = audio.compress(source, entry / "audio.mp3")
         chunks = audio.split(small, entry / "chunks")

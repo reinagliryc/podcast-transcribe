@@ -24,11 +24,32 @@ def llm_keys_path() -> Path:
     return config / "io.datasette.llm" / "keys.json"
 
 
-def find_api_key(explicit: str | None = None) -> str:
+def read_key_file(path: Path) -> str:
+    try:
+        key = Path(path).expanduser().read_text().strip()
+    except OSError as e:
+        raise RuntimeError(f"cannot read Groq API key file {path}: {e.strerror}") from None
+    if not key:
+        raise RuntimeError(f"Groq API key file {path} is empty")
+    return key
+
+
+def find_api_key(explicit: str | None = None, key_file: Path | None = None) -> str:
+    """Look the key up, first match wins:
+    --api-key, --api-key-file, $GROQ_API_KEY, $GROQ_API_KEY_FILE,
+    $CREDENTIALS_DIRECTORY/groq (systemd LoadCredential=groq:...), llm's keys.json."""
     if explicit:
         return explicit
+    if key_file:
+        return read_key_file(key_file)
     if key := os.environ.get("GROQ_API_KEY"):
         return key
+    if env_file := os.environ.get("GROQ_API_KEY_FILE"):
+        return read_key_file(Path(env_file))
+    if creds := os.environ.get("CREDENTIALS_DIRECTORY"):
+        cred = Path(creds) / "groq"
+        if cred.is_file():
+            return read_key_file(cred)
     path = llm_keys_path()
     try:
         if key := json.loads(path.read_text()).get("groq"):
@@ -36,7 +57,8 @@ def find_api_key(explicit: str | None = None) -> str:
     except (OSError, ValueError):
         pass
     raise RuntimeError(
-        "no Groq API key: set GROQ_API_KEY, pass --api-key, or run `llm keys set groq`"
+        "no Groq API key: use --api-key-file, GROQ_API_KEY_FILE, GROQ_API_KEY, "
+        "systemd LoadCredential=groq:..., or `llm keys set groq`"
     )
 
 

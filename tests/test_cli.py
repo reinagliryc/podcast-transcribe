@@ -52,3 +52,38 @@ def test_chunked_transcription_and_cache(sample, tmp_path, fake_groq, monkeypatc
 def test_missing_file_is_an_error(tmp_path, capsys):
     assert cli.main([str(tmp_path / "nope.mp3")]) == 1
     assert "error" in capsys.readouterr().err
+
+
+def test_child_env_has_no_groq_key(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "secret")
+    monkeypatch.setenv("GROQ_API_KEY_FILE", "/x")
+    env = audio.child_env()
+    assert not any(k.startswith("GROQ_") for k in env)
+    assert "PATH" in env
+
+
+FAKE_YTDLP = """#!/bin/sh
+# Fake yt-dlp: write a file at the -o template, print the title, dump env.
+while [ $# -gt 0 ]; do
+  case "$1" in -o) out="$2"; shift;; esac; shift
+done
+f=$(echo "$out" | sed 's/%(ext)s/webm/')
+echo fake > "$f"
+env > "$(dirname "$f")/env.txt"
+echo "Ma vidéo : épisode 1"
+"""
+
+
+def test_ytdlp_title_and_env(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "yt-dlp").write_text(FAKE_YTDLP)
+    (bindir / "yt-dlp").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    monkeypatch.setenv("GROQ_API_KEY", "secret")
+
+    entry = tmp_path / "entry"
+    path = cli.ytdlp_download("https://example.com/watch?v=x", entry)
+    assert path.name == "source.webm"
+    assert (entry / "title.txt").read_text(encoding="utf-8") == "Ma vidéo : épisode 1"
+    assert "secret" not in (entry / "env.txt").read_text(), "yt-dlp must not see the key"

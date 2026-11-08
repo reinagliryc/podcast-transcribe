@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,6 +12,12 @@ from pathlib import Path
 BITRATE = "32k"
 MAX_UPLOAD_BYTES = 24 * 1024 * 1024
 CHUNK_SECONDS = 30 * 60
+
+
+def child_env() -> dict[str, str]:
+    """Environment for external tools (ffmpeg, yt-dlp): without the Groq key,
+    which they never need. They process untrusted media and web pages."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GROQ_")}
 
 
 def require(tool: str) -> str:
@@ -27,7 +34,7 @@ def compress(src: Path, dst: Path) -> Path:
     subprocess.run(
         [require("ffmpeg"), "-nostdin", "-y", "-loglevel", "error", "-i", str(src),
          "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", BITRATE, str(tmp)],
-        check=True,
+        check=True, env=child_env(),
     )
     tmp.rename(dst)
     return dst
@@ -37,7 +44,7 @@ def duration(path: Path) -> float:
     out = subprocess.run(
         [require("ffprobe"), "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, env=child_env(),
     ).stdout.strip()
     return float(out)
 
@@ -53,7 +60,7 @@ def split(path: Path, workdir: Path) -> list[tuple[Path, float]]:
         [require("ffmpeg"), "-nostdin", "-y", "-loglevel", "error", "-i", str(path),
          "-f", "segment", "-segment_time", str(CHUNK_SECONDS), "-c", "copy",
          str(workdir / "chunk_%03d.mp3")],
-        check=True,
+        check=True, env=child_env(),
     )
     chunks, offset = [], 0.0
     for chunk in sorted(workdir.glob("chunk_*.mp3")):
