@@ -1,5 +1,6 @@
 """End-to-end CLI tests with the Groq API mocked out (no network, no cost)."""
 
+import os
 import shutil
 import subprocess
 
@@ -79,7 +80,7 @@ def test_ytdlp_title_and_env(tmp_path, monkeypatch):
     bindir.mkdir()
     (bindir / "yt-dlp").write_text(FAKE_YTDLP)
     (bindir / "yt-dlp").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
     monkeypatch.setenv("GROQ_API_KEY", "secret")
 
     entry = tmp_path / "entry"
